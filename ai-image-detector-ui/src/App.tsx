@@ -9,13 +9,14 @@ import {
   Zap,
   Clock,
   Sun,
-  Moon
+  Moon,
+  Database
 } from 'lucide-react';
 import './App.css';
 import DemoModal from './DemoModal';
 
 // Connection to Hosted Hugging Face API
-const API_BASE_URL = '';
+const API_BASE_URL = 'http://localhost:8000';
 
 interface ScanResult {
   filename: string;
@@ -24,6 +25,40 @@ interface ScanResult {
   prediction_label: string;
   timestamp: string;
   image_url?: string;
+  forensics?: {
+    ela_score: number;
+    noise_variance?: number;
+    is_noise_suspicious?: boolean;
+    fft_analysis?: {
+      peak_ratio: number;
+      has_checkerboard: boolean;
+    };
+    structural_analysis?: {
+      entropy: number;
+      structural_variance_coeff: number;
+      is_inconsistent: boolean;
+    };
+    forensic_probability: number;
+    sensor_match: boolean;
+    noise_profile?: {
+      skewness: number;
+      kurtosis: number;
+      variance: number;
+    };
+  };
+  metadata?: {
+    data: Record<string, string>;
+    verdict: string;
+    confidence: number;
+    is_ai_generated: boolean;
+    has_metadata: boolean;
+    has_camera_info: boolean;
+  };
+  ml_analysis?: {
+    is_ai_generated: boolean;
+    confidence: number;
+    raw_score: number;
+  };
 }
 
 const App: React.FC = () => {
@@ -285,16 +320,145 @@ const App: React.FC = () => {
                       <div className="metrics-grid">
                         <div className="metric">
                           <Shield size={16} />
-                          <span>Status</span>
-                          <strong>Verified</strong>
+                          <span>ML Score</span>
+                          <strong>{result.ml_analysis ? `${(result.ml_analysis.confidence * 100).toFixed(1)}%` : 'N/A'}</strong>
+                        </div>
+                        <div className="metric">
+                          <Database size={16} />
+                          <span>Metadata</span>
+                          <strong>{result.metadata?.verdict || 'Unknown'}</strong>
                         </div>
                         <div className="metric">
                           <Zap size={16} />
-                          <span>Source</span>
-                          <strong>HF Cloud</strong>
+                          <span>Combined</span>
+                          <strong>{result.prediction_label}</strong>
                         </div>
                       </div>
                     </motion.div>
+
+                    {/* Metadata Analysis Card */}
+                    <motion.div
+                      className={`metadata-card analysis-card ${result.metadata?.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.2 }}
+                    >
+                      <div className="card-header">
+                        <div className="header-badge">
+                          <Database size={20} />
+                          <span>Digital Footprint Analysis</span>
+                        </div>
+                        <div className="model-name">EXIF Data Structure</div>
+                      </div>
+
+                      <div className="verdict-section">
+                        <div className="verdict-icon">
+                          {result.metadata?.is_ai_generated ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
+                        </div>
+                        <h3 className="verdict-text">{result.metadata?.verdict || 'Unknown'}</h3>
+                        <div className="confidence-bar">
+                          <div className="bar-fill" style={{ width: `${(result.metadata?.confidence || 0) * 100}%` }}></div>
+                        </div>
+                        <p className="confidence-text">{((result.metadata?.confidence || 0) * 100).toFixed(1)}% Metadata Confidence</p>
+                      </div>
+
+                      <div className="metadata-content">
+                        {result.metadata?.has_metadata ? (
+                          <>
+                            <div className="metadata-summary">
+                              <p>
+                                {result.metadata.has_camera_info
+                                  ? '✓ Authenticity criteria met'
+                                  : '⚠ Missing critical camera metadata'}
+                              </p>
+                              <p>Found {Object.keys(result.metadata.data).length} metadata field{Object.keys(result.metadata.data).length !== 1 ? 's' : ''}</p>
+                            </div>
+                            <div className="metadata-grid">
+                              {Object.entries(result.metadata.data).map(([key, value]) => {
+                                const isImportant = ['ResolutionUnit', 'YResolution', 'XResolution', 'YCbCrPositioning', 'Make', 'Model', 'Software', 'DateTime', 'DateTimeOriginal', 'GPSInfo'].includes(key);
+                                return (
+                                  <div key={key} className={`metadata-item ${isImportant ? 'important-meta' : ''}`}>
+                                    <span className="meta-label">{key}</span>
+                                    <span className="meta-value" title={String(value)}>{String(value)}</span>
+                                    {isImportant && <CheckCircle size={10} className="important-check" />}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="no-metadata-warning">
+                            <AlertTriangle size={32} />
+                            <div>
+                              <h4>No Metadata Detected</h4>
+                              <p>Missing EXIF data is a strong indicator of synthetic generation or heavy editing.</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+
+                    {/* Forensic Lab Card */}
+                    {result.forensics && (
+                      <motion.div
+                        className={`forensic-card analysis-card ${(result.forensics.ela_score > 1.5 ||
+                          !result.forensics.sensor_match ||
+                          result.forensics.fft_analysis?.has_checkerboard ||
+                          result.forensics.structural_analysis?.is_inconsistent ||
+                          result.forensics.forensic_probability > 0.5) ? 'ai-theme' : 'real-theme'}`}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.3 }}
+                      >
+                        <div className="card-header">
+                          <div className="header-badge">
+                            <Shield size={20} />
+                            <span>Forensic Lab analysis</span>
+                          </div>
+                          <div className="model-name">DFFT & Texture Scan</div>
+                        </div>
+
+                        <div className="verdict-section">
+                          <div className="verdict-icon">
+                            {(result.forensics.forensic_probability > 0.5 || result.forensics.fft_analysis?.has_checkerboard) ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
+                          </div>
+                          <h3 className="verdict-text">{(result.forensics.forensic_probability > 0.5 || result.forensics.fft_analysis?.has_checkerboard) ? "SUSPICIOUS" : "CONSISTENT"}</h3>
+                          <div className="confidence-bar">
+                            <div className="bar-fill" style={{ width: `${(1 - result.forensics.forensic_probability) * 100}%` }}></div>
+                          </div>
+                          <p className="confidence-text">{(100 - (result.forensics.forensic_probability * 100)).toFixed(1)}% Forensic Integrity</p>
+                        </div>
+
+                        <div className="forensic-grid-extended">
+                          <div className="f-metric-mini">
+                            <div className="f-label">Error Level</div>
+                            <div className={`f-status ${result.forensics.ela_score > 1.5 ? 'warning' : 'success'}`}>{result.forensics.ela_score > 1.5 ? "⚠ High" : "✓ Normal"}</div>
+                          </div>
+                          <div className="f-metric-mini">
+                            <div className="f-label">Sensor Noise</div>
+                            <div className={`f-status ${!result.forensics.sensor_match ? 'warning' : 'success'}`}>{result.forensics.sensor_match ? "✓ Match" : "⚠ Synthetic"}</div>
+                          </div>
+                          <div className="f-metric-mini">
+                            <div className="f-label">FFT Patterns</div>
+                            <div className={`f-status ${result.forensics.fft_analysis?.has_checkerboard ? 'warning' : 'success'}`}>{result.forensics.fft_analysis?.has_checkerboard ? "⚠ Pattern" : "✓ Clean"}</div>
+                          </div>
+                          <div className="f-metric-mini">
+                            <div className="f-label">Texture</div>
+                            <div className={`f-status ${result.forensics.structural_analysis?.is_inconsistent ? 'warning' : 'success'}`}>{result.forensics.structural_analysis?.is_inconsistent ? "⚠ Discord" : "✓ Consistent"}</div>
+                          </div>
+                        </div>
+
+                        <div className="forensic-summary">
+                          <p className="summary-text">
+                            {result.forensics.fft_analysis?.has_checkerboard
+                              ? "Artificial checkerboard patterns detected via frequency domain scan (High probability of AI upscaling)."
+                              : result.forensics.structural_analysis?.is_inconsistent
+                                ? "Local structural anomalies found in pixel transitions (Anatomical suspect)."
+                                : "Pixel distribution and domain signals match natural photographic patterns."}
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
                   </div>
 
                   <div className="json-raw-section">
@@ -343,11 +507,11 @@ const App: React.FC = () => {
               </div>
             </motion.div>
           </div>
-        </div>
-      </main>
+        </div >
+      </main >
 
       <DemoModal showDemo={showDemo} setShowDemo={setShowDemo} />
-    </div>
+    </div >
   );
 };
 
