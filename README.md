@@ -1,21 +1,14 @@
----
-<<<<<<< HEAD
-title: AI Image Detector
-emoji: 🔍
-colorFrom: blue
-=======
 title: Detetor2.0
 emoji: 📈
 colorFrom: yellow
->>>>>>> fbf60e198b2dd2a2f660077e1d8173bf5a360662
 colorTo: purple
 sdk: docker
 pinned: false
 license: mit
----
 
-<<<<<<< HEAD
+
 # AI Image Detector 🔍
+
 
 An advanced AI-powered image authenticity verification system that uses machine learning to detect AI-generated images vs. authentic photos.
 
@@ -97,6 +90,4 @@ MIT License - See LICENSE file for details
 ## Author
 
 Built with ❤️ for image authenticity verification
-=======
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
->>>>>>> fbf60e198b2dd2a2f660077e1d8173bf5a360662
+
