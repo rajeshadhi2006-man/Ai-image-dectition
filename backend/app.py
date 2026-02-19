@@ -374,6 +374,7 @@ def extract_metadata(image: Image.Image):
     }
 
 HF_API_URL = "https://rajesh9698-ai-image-detector-api.hf.space/predict"
+IS_ON_HF = os.environ.get('SPACE_ID') is not None or os.environ.get('HF_HUB_OFFLINE') is not None
 
 def predict_with_hf_api(image_bytes, filename="image.jpg"):
     """
@@ -419,7 +420,8 @@ def predict_with_hf_api(image_bytes, filename="image.jpg"):
 
 def predict_is_ai_generated(image: Image.Image, image_bytes: bytes = None):
     # 1. Try Remote Node first (User's HF Space)
-    if image_bytes:
+    # ONLY if we are NOT already running on HF Spaces to avoid infinite recursion
+    if image_bytes and not IS_ON_HF:
         remote_result = predict_with_hf_api(image_bytes)
         if remote_result:
             logger.info(f"Remote ML Prediction: {remote_result}")
