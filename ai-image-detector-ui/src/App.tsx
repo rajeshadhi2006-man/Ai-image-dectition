@@ -18,8 +18,8 @@ import {
 import './App.css';
 import DemoModal from './DemoModal';
 
-// Connection to Hosted Hugging Face API
-const rawApiUrl = import.meta.env.VITE_API_URL || window.location.origin;
+// API URL: uses VITE_API_URL env var in production, falls back to local backend for dev
+const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_BASE_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 interface ScanResult {
@@ -503,9 +503,9 @@ const App: React.FC = () => {
                             </p>
                           </div>
                           <div className="metrics-grid">
-                            <div className="metric"><Shield size={16} /><span>ML Score</span><strong>{result.ml_analysis ? `${(result.ml_analysis.confidence * 100).toFixed(1)}%` : 'N/A'}</strong></div>
-                            <div className="metric"><Zap size={16} /><span>Raw Score</span><strong>{result.ml_analysis?.raw_score !== undefined ? result.ml_analysis.raw_score.toFixed(4) : 'N/A'}</strong></div>
-                            <div className="metric"><Database size={16} /><span>Digital Forensic Lab</span><strong>{result.metadata?.has_metadata ? (result.metadata?.verdict || 'Available') : 'Unknown'}</strong></div>
+                            <div className="metric"><Shield size={16} /><span>ML Score</span><strong>{result.ml_analysis?.confidence !== undefined ? `${(result.ml_analysis.confidence * 100).toFixed(1)}%` : `${(result.confidence * 100).toFixed(1)}%`}</strong></div>
+                            <div className="metric"><Zap size={16} /><span>Raw Score</span><strong>{result.ml_analysis?.raw_score !== undefined ? result.ml_analysis.raw_score.toFixed(4) : result.confidence.toFixed(4)}</strong></div>
+                            <div className="metric"><Database size={16} /><span>Digital Forensic Lab</span><strong>{result.metadata?.verdict || 'Available'}</strong></div>
                           </div>
                         </motion.div>
                       )}
