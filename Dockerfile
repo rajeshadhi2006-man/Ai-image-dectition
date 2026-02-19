@@ -29,8 +29,8 @@ COPY --from=frontend-builder /app/frontend/dist ./static
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create uploads directory
-RUN mkdir -p uploads
+# Create uploads directory and history file if needed
+RUN mkdir -p uploads && touch history.json && chmod 777 history.json uploads
 
 # Expose port (Hugging Face uses 7860 by default)
 EXPOSE 7860

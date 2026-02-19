@@ -78,17 +78,8 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_FOLDER), name="uploads")
 
 # Mount static frontend files if they exist
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
-
-@app.get("/")
-async def read_index():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"message": "AI Detector API is running. Frontend not found."}
-
 if os.path.exists(STATIC_DIR):
-    # Mount everything else in static to /
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, 'assets')), name="assets")
 
 import tensorflow as tf
 

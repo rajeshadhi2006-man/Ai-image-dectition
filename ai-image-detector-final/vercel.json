@@ -1,0 +1,9 @@
+{
+    "version": 2,
+    "rewrites": [
+        {
+            "source": "/api/:path*",
+            "destination": "https://rajesh9698-ai-image-detector-api.hf.space/:path*"
+        }
+    ]
+}

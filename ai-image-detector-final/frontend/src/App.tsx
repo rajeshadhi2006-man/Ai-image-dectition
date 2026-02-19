@@ -19,7 +19,7 @@ import './App.css';
 import DemoModal from './DemoModal';
 
 // Connection to Hosted Hugging Face API
-const rawApiUrl = import.meta.env.VITE_API_URL || window.location.origin;
+const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_BASE_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 interface ScanResult {
@@ -52,9 +52,14 @@ interface ScanResult {
       structure: number;
     };
     noise_profile?: {
-      skewness: number;
-      kurtosis: number;
-      variance: number;
+      skewness?: number;
+      kurtosis?: number;
+      variance?: number;
+      high_freq_energy?: number;
+      noise_score?: number;
+      is_natural_sensor?: boolean;
+      gaussian_fit?: number;
+      cfa_match?: number;
     };
   };
   metadata?: {
