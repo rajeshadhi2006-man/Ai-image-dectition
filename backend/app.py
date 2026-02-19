@@ -396,7 +396,12 @@ def predict_with_hf_api(image_bytes, filename="image.jpg"):
             return None
             
         # Parse the custom API response (matches our local schema)
-        result = response.json()
+        try:
+            result = response.json()
+        except Exception as e:
+            logger.error(f"Failed to parse JSON from remote node: {e}")
+            logger.error(f"Response snippet: {response.text[:200]}")
+            return None
         
         # Check if we have the specific ml_analysis block we need
         if 'ml_analysis' in result:
