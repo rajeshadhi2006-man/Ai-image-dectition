@@ -1,0 +1,27 @@
+services:
+  # Backend API Service
+  - type: web
+    name: ai-image-detector-api
+    runtime: python
+    repo: https://github.com/rajeshadhi2006-man/Ai-image-dectition.git
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
+
+  # Frontend Static Site
+  - type: static
+    name: ai-image-detector-ui
+    runtime: node
+    repo: https://github.com/rajeshadhi2006-man/Ai-image-dectition.git
+    rootDir: ai-image-detector-ui
+    buildCommand: npm install && npm run build
+    publishDir: dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: ai-image-detector-api
+          property: url
