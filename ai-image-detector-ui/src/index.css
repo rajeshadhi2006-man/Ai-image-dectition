@@ -90,7 +90,7 @@ h6 {
 
 ::-webkit-scrollbar-thumb {
   background: #04044e;
-  border-radius: 10px;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -153,7 +153,7 @@ h6 {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--glass-border);
-  border-radius: 24px;
+  border-radius: 4px;
 }
 
 /* Utility Animations */

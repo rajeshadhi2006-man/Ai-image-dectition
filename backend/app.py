@@ -38,14 +38,16 @@ history_lock = threading.Lock()
 
 def load_history():
     global scan_history
-    # Clear history to avoid format conflicts
-    scan_history = []
     if os.path.exists(HISTORY_FILE):
         try:
-            os.remove(HISTORY_FILE)
-            logger.info("Cleared old history file.")
-        except:
-            pass
+            with open(HISTORY_FILE, 'r') as f:
+                scan_history = json.load(f)
+            logger.info(f"Loaded {len(scan_history)} history entries.")
+        except Exception as e:
+            logger.error(f"Error loading history file: {e}")
+            scan_history = []
+    else:
+        scan_history = []
 
 def save_history():
     try:
@@ -65,7 +67,11 @@ app = FastAPI(title="AI Image Detector API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://ai-image-detector-ui.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -336,16 +342,30 @@ def extract_metadata(image: Image.Image):
     
     has_camera_info = any(field in metadata for field in important_fields)
     
-    # Determine metadata verdict
+    # DIGITAL FOOTPRINT ANALYSIS
+    software_ref = metadata.get('Software', '').lower()
+    is_edited = any(s in software_ref for s in ['adobe', 'photoshop', 'gimp', 'canva', 'framer'])
+    
+    # Determine metadata/footprint verdict
     if has_camera_info:
-        metadata_verdict = "Authentic"
-        metadata_confidence = 0.95 
-        metadata_is_ai = False
+        if is_edited:
+            metadata_verdict = "Edited Footprint"
+            metadata_confidence = 0.75
+            metadata_is_ai = False
+        else:
+            metadata_verdict = "Physical Footprint"
+            metadata_confidence = 0.98
+            metadata_is_ai = False
     else:
-        # User requested to remove the 'AI-Generated' condition for missing metadata
-        metadata_verdict = "Metadata Missing"
-        metadata_confidence = 0.40 # Low confidence just because it's missing
-        metadata_is_ai = True # Still technically a flag for the ensemble, but less aggressive
+        # User: Missing EXIF is only AI if zero footprint exists
+        if has_metadata:
+            metadata_verdict = "Anomalous Footprint"
+            metadata_confidence = 0.60
+            metadata_is_ai = True
+        else:
+            metadata_verdict = "Zero Footprint"
+            metadata_confidence = 0.85 # Strong AI indicator
+            metadata_is_ai = True
     
     return {
         "data": metadata,
@@ -353,16 +373,69 @@ def extract_metadata(image: Image.Image):
         "confidence": metadata_confidence,
         "is_ai_generated": metadata_is_ai,
         "has_metadata": has_metadata,
-        "has_camera_info": has_camera_info
+        "has_camera_info": has_camera_info,
+        "is_edited": is_edited
     }
 
-def predict_is_ai_generated(image: Image.Image):
+HF_API_URL = "https://rajesh9698-ai-image-detector-api.hf.space/predict"
+
+def predict_with_hf_api(image_bytes, filename="image.jpg"):
+    """
+    Call the User's Custom Hosted API on Hugging Face Spaces.
+    URL: https://rajesh9698-ai-image-detector-api.hf.space/predict
+    """
+    try:
+        import requests
+        # The user's API expects a multipart/form-data upload with key 'file'
+        files = {'file': (filename, image_bytes, 'image/jpeg')}
+        
+        # We don't need the HF_API_KEY for this public space unless it's protected.
+        # If it is protected, we'd add the bearer token. 
+        # For now, we try public access or standard Space access.
+        response = requests.post(HF_API_URL, files=files, timeout=15)
+        
+        if response.status_code != 200:
+            logger.error(f"Remote Node Error ({response.status_code}): {response.text}")
+            return None
+            
+        # Parse the custom API response (matches our local schema)
+        result = response.json()
+        
+        # Check if we have the specific ml_analysis block we need
+        if 'ml_analysis' in result:
+            ml_data = result['ml_analysis']
+            return {
+                "is_ai": ml_data.get('is_ai_generated', False),
+                "confidence": ml_data.get('confidence', 0.0),
+                "score": ml_data.get('raw_score', 0.0)
+            }
+        
+        # Fallback: Use the top-level result if ml_analysis is missing
+        return {
+            "is_ai": result.get('is_ai_generated', False),
+            "confidence": result.get('confidence', 0.0),
+            "score": result.get('confidence', 0.0) if result.get('is_ai_generated') else (1.0 - result.get('confidence', 0.0))
+        }
+
+    except Exception as e:
+        logger.error(f"Remote Node Exception: {e}")
+        return None
+
+def predict_is_ai_generated(image: Image.Image, image_bytes: bytes = None):
+    # 1. Try Remote Node first (User's HF Space)
+    if image_bytes:
+        remote_result = predict_with_hf_api(image_bytes)
+        if remote_result:
+            logger.info(f"Remote ML Prediction: {remote_result}")
+            return remote_result['is_ai'], remote_result['confidence'], remote_result['score']
+            
+    # 2. Fallback to Local Model
     if MODEL:
         try:
             processed_img = preprocess_image(image)
             prediction = MODEL.predict(processed_img, verbose=0)
             score = float(prediction[0][0]) 
-            logger.info(f"ML Prediction Raw Score: {score}")
+            logger.info(f"Local ML Prediction Raw Score: {score}")
             is_ai = score > 0.5
             confidence = score if is_ai else (1.0 - score)
             return is_ai, confidence, score
@@ -417,85 +490,146 @@ async def predict(
         fft_analysis = analyze_frequency_domain(image)
         struct_analysis = analyze_structural_consistency(image)
         
-        # Forensic suspect calculation (Heuristic)
-        forensic_ai_probability = 0.0
-        if ela_mean > 1.5: forensic_ai_probability += 0.3
-        if ela_max > 50: forensic_ai_probability += 0.1
+        # --- NEW THREE-BRANCH FORENSIC SCORING (User Requested) ---
         
-        # USER REQUEST: AI_Score += 3 (Repeating artificial pattern)
-        # Scaled to probability influence
-        checkerboard_alert = fft_analysis and fft_analysis.get('has_checkerboard', False)
-        if checkerboard_alert:
-            forensic_ai_probability += 0.5 # Heavy weight for artificial patterns
-            
-        # USER REQUEST: AI_Score += 2 (Anatomical inconsistency)
-        struct_alert = struct_analysis and struct_analysis.get('is_inconsistent', False)
-        if struct_alert:
-            forensic_ai_probability += 0.3 # Strong weight for structural anomalies
+        # BRANCH 1: Domain Integrity (ELA + FFT checkerboard detection)
+        domain_score = 100.0
+        if ela_mean > 1.2: domain_score -= 15
+        if ela_mean > 2.0: domain_score -= 20
+        if fft_analysis and fft_analysis.get('has_checkerboard'): domain_score -= 50
+        domain_score = max(0.0, domain_score)
         
-        # THE NOISE PATTERN RULE: Compare with natural camera signatures
-        real_score_boost = 0.0
-        ai_score_boost = 0.0
-        if noise_profile and noise_profile.get('is_natural_sensor', False):
-            real_score_boost = 2.0  # Natural sensor (+2 Real)
-        else:
-            ai_score_boost = 2.0    # Suspicious noise (+2 AI)
+        # BRANCH 2: Sensor Authenticity (Noise Pattern Correlation)
+        sensor_score = 0.0
+        if noise_profile:
+            sensor_score = noise_profile.get('noise_score', 0.0) * 100.0
+        sensor_score = min(max(sensor_score, 0.0), 100.0)
             
-        if ai_score_boost > 0:
-            forensic_ai_probability += 0.3
-            
-        # Clip probability
-        forensic_ai_probability = min(forensic_ai_probability, 1.0)
+        # BRANCH 3: Structural Consistency (Local entropy & Anatomical cues)
+        structure_score = 100.0
+        if struct_analysis:
+            if struct_analysis.get('is_inconsistent'): structure_score -= 60
+            ent = struct_analysis.get('entropy', 5.0)
+            if ent < 3.8: structure_score -= 20
+            if ent < 3.0: structure_score -= 20
+        structure_score = max(0.0, structure_score)
+        
+        # FINAL FORENSIC INTEGRITY SCORE (Weighted Ensemble)
+        # Weights: Domain (40%), Sensor (30%), Structure (30%)
+        final_forensic_integrity = (domain_score * 0.4) + (sensor_score * 0.3) + (structure_score * 0.3)
+        
+        # Convert to probability for internal logic
+        forensic_ai_probability = 1.0 - (final_forensic_integrity / 100.0)
         
         # 2. Extract metadata
         raw_metadata = extract_metadata(Image.open(io.BytesIO(contents)))
         
         # 3. Get ML prediction
-        ml_is_ai, ml_confidence, raw_score = predict_is_ai_generated(image.convert('RGB'))
+        ml_is_ai, ml_confidence, raw_score = predict_is_ai_generated(image.convert('RGB'), image_bytes=contents)
         
         # 4. Hybrid Decision Logic (High Accuracy Ensemble)
-        # Re-calculating adjusted score with new forensic signals
+        # Final combined AI score based on ML + Forensic signals
         adjusted_ai_score = (raw_score * 0.4) + (forensic_ai_probability * 0.6)
         
-        if real_score_boost > 0:
-            adjusted_ai_score = max(adjusted_ai_score - 0.3, 0.0)
-        elif ai_score_boost > 0 or checkerboard_alert:
-            # If checkerboard or suspicious noise, push harder toward AI
-            adjusted_ai_score = min(adjusted_ai_score + 0.4, 1.0)
+        # Threshold checks for manual boosts
+        checkerboard_alert = fft_analysis and fft_analysis.get('has_checkerboard', False)
+        if checkerboard_alert or (sensor_score < 40):
+            adjusted_ai_score = min(adjusted_ai_score + 0.3, 1.0)
+        
+        if sensor_score > 80 and not checkerboard_alert:
+            adjusted_ai_score = max(adjusted_ai_score - 0.2, 0.0)
 
         metadata_is_ai = raw_metadata.get('is_ai_generated', True)
         metadata_confidence = raw_metadata.get('confidence', 0.0)
         
-        # THE GOLDEN RULE: Metadata "Authentic" override
-        if not metadata_is_ai:
-            final_is_ai = False
-            final_confidence = max(metadata_confidence, 1.0 - adjusted_ai_score)
+        # USER REQUEST: Footprint_Score Logic
+        # (metadata_score + source_score + file_structure_score + sensor_score + ai_artifact_score)
+        
+        # 1. Metadata Score (0-20)
+        # 20 = Rich Camera Info, 10 = Basic Metadata, 0 = None/Stripped
+        md_score = 0
+        if raw_metadata.get('has_camera_info'): md_score = 20
+        elif raw_metadata.get('has_metadata'): md_score = 10
+        
+        # 2. Source Score (0-20)
+        # 20 = Clean/Firmware, 0 = Edited Software Signature
+        src_score = 0
+        if not raw_metadata.get('is_edited', False): src_score = 20
+        
+        # 3. File Structure Score (0-20)
+        # 20 = Standard JPEG/TIFF, 10 = PNG/WebP (Common for AI exports), 5 = Other
+        fs_score = 10
+        if filename.lower().endswith(('.jpg', '.jpeg', '.tiff', '.dng')): fs_score = 20
+        
+        # 4. Sensor Score (0-20)
+        # Derived from Noise Analysis (is_natural_sensor)
+        # If noise_score > 0.65 it was "Real", so map that roughly
+        ns_score = 0
+        if noise_profile:
+             # Map noise_score (0.0-1.0) to 0-20
+             raw_ns = noise_profile.get('noise_score', 0.0)
+             ns_score = min(raw_ns * 20, 20)
+        
+        # 5. AI Artifact Score (0-20) 
+        # 20 = Clean, 0 = Artifacts Found
+        fft_hit = fft_analysis.get('has_checkerboard', False) if fft_analysis else False
+        struct_hit = struct_analysis.get('is_inconsistent', False) if struct_analysis else False
+        art_score = 20
+        if fft_hit: art_score -= 10
+        if struct_hit: art_score -= 10
+        art_score = max(art_score, 0)
+        
+        footprint_score = md_score + src_score + fs_score + ns_score + art_score
+        # Threshold > 50 => REAL
+        is_footprint_real = footprint_score > 50
+        
+        # Update Metadata Verdict based on deep footprint score
+        raw_metadata['footprint_score'] = float(footprint_score)
+        if is_footprint_real:
+            raw_metadata['verdict'] = "Physical Footprint"
+            raw_metadata['confidence'] = min(footprint_score / 100.0 + 0.2, 0.99)
+            raw_metadata['is_ai_generated'] = False
         else:
-            final_is_ai = adjusted_ai_score > 0.5
-            final_confidence = adjusted_ai_score if final_is_ai else (1.0 - adjusted_ai_score)
-            
-            # High-confidence trigger for multiple artificial signals
-            if final_is_ai and (checkerboard_alert or struct_alert):
-                final_confidence = max(final_confidence, 0.98)
+            raw_metadata['verdict'] = "Digital/Artificial Footprint"
+            raw_metadata['confidence'] = min((100 - footprint_score) / 100.0 + 0.2, 0.98) 
+            raw_metadata['is_ai_generated'] = True
+        
+        # 4. Backend Simplification (User Requested)
+        # Bypassing the Hybrid Decision Logic / Ensemble Engine.
+        # The top-level verdict is now just the ML prediction.
+        final_is_ai = ml_is_ai
+        final_confidence = ml_confidence
 
         base_url = str(request.base_url).rstrip('/')
         image_url = f"{base_url}/uploads/{unique_filename}"
+        
+        # GLOBAL AUTHENTICITY SCORE (100 = Authentic, 0 = AI-Generated)
+        # This combines all signals: ML, Forensics, and Metadata
+        # Invert the AI score to get Authenticity
+        global_score = (1.0 - adjusted_ai_score) * 100.0
         
         result = {
             "filename": filename,
             "is_ai_generated": bool(final_is_ai),
             "confidence": float(final_confidence),
+            "global_score": float(global_score),
             "prediction_label": "AI-Generated" if final_is_ai else "Authentic",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "image_url": image_url,
             "metadata": raw_metadata,
             "forensics": {
+                "branch_scores": {
+                    "domain": float(domain_score),
+                    "sensor": float(sensor_score),
+                    "structure": float(structure_score)
+                },
+                "final_integrity": float(final_forensic_integrity),
                 "ela_score": float(ela_mean),
                 "noise_profile": noise_profile,
                 "fft_analysis": fft_analysis,
                 "structural_analysis": struct_analysis,
                 "forensic_probability": float(forensic_ai_probability),
-                "sensor_match": noise_profile.get('is_natural_sensor', False) if noise_profile else False
+                "sensor_match": sensor_score > 50
             },
             "ml_analysis": {
                 "is_ai_generated": bool(ml_is_ai),

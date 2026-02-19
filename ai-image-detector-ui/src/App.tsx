@@ -10,18 +10,23 @@ import {
   Clock,
   Sun,
   Moon,
-  Database
+  Database,
+  HelpCircle,
+  Trash2,
+  X
 } from 'lucide-react';
 import './App.css';
 import DemoModal from './DemoModal';
 
 // Connection to Hosted Hugging Face API
-const API_BASE_URL = 'http://localhost:8000';
+const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 interface ScanResult {
   filename: string;
   is_ai_generated: boolean;
   confidence: number;
+  global_score: number;
   prediction_label: string;
   timestamp: string;
   image_url?: string;
@@ -40,6 +45,12 @@ interface ScanResult {
     };
     forensic_probability: number;
     sensor_match: boolean;
+    final_integrity?: number;
+    branch_scores?: {
+      domain: number;
+      sensor: number;
+      structure: number;
+    };
     noise_profile?: {
       skewness: number;
       kurtosis: number;
@@ -68,7 +79,10 @@ const App: React.FC = () => {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [activeTab, setActiveTab] = useState<'ml' | 'metadata' | 'forensics'>('ml');
   const [history, setHistory] = useState<ScanResult[]>([]);
+  const [flash, setFlash] = useState<'red' | 'green' | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
   });
@@ -83,7 +97,6 @@ const App: React.FC = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  // Local storage used for history since hosted API doesn't support /history endpoint
   const loadLocalHistory = () => {
     const saved = localStorage.getItem('scan_history');
     if (saved) {
@@ -101,6 +114,20 @@ const App: React.FC = () => {
     localStorage.setItem('scan_history', JSON.stringify(updated));
   };
 
+  const clearHistory = () => {
+    if (window.confirm("Delete all scan history? This cannot be undone.")) {
+      setHistory([]);
+      localStorage.removeItem('scan_history');
+    }
+  };
+
+  const deleteHistoryItem = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation();
+    const updated = history.filter((_, i) => i !== index);
+    setHistory(updated);
+    localStorage.setItem('scan_history', JSON.stringify(updated));
+  };
+
   useEffect(() => {
     loadLocalHistory();
   }, []);
@@ -112,7 +139,18 @@ const App: React.FC = () => {
       reader.onload = () => setPreview(reader.result as string);
       reader.readAsDataURL(selectedFile);
       setResult(null);
+      setShowReport(false);
+      setActiveTab('ml');
     }
+  };
+
+  const reset = () => {
+    setFile(null);
+    setPreview(null);
+    setResult(null);
+    setShowReport(false);
+    setActiveTab('ml');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -164,8 +202,6 @@ const App: React.FC = () => {
       });
       const data = response.data as ScanResult;
 
-      // Some APIs might not return timestamp/prediction_label in exact format
-      // We normalize here to ensure the UI stays stable
       const normalizedResult: ScanResult = {
         ...data,
         timestamp: data.timestamp || new Date().toLocaleString(),
@@ -174,31 +210,25 @@ const App: React.FC = () => {
 
       setResult(normalizedResult);
       saveToLocalHistory(normalizedResult);
+      setFlash(normalizedResult.is_ai_generated ? 'red' : 'green');
+      setTimeout(() => setFlash(null), 1000);
 
-      setTimeout(() => {
-        if (normalizedResult.is_ai_generated) {
-          speak("alert it is artificial image genrated image");
-        } else {
-          speak("safe the image is real");
-        }
-      }, 1000);
+      if (normalizedResult.is_ai_generated) {
+        speak("alert, alert artificial intelligence generated image");
+      } else {
+        speak("safe the image is real");
+      }
+      setLoading(false);
+      setShowReport(true);
 
     } catch (error: any) {
-      console.error('Analysis error detail:', error);
-      const errorMessage = error.response?.data?.detail || error.message || 'Unknown connection error';
-      alert(`Connection failed: ${errorMessage}. Please ensure the Hugging Face space is active and check your internet connection.`);
-    } finally {
-      // Small delay to let the virtual scanning effect be visible
-      setTimeout(() => {
-        setLoading(false);
-      }, 2500);
+      console.error('Analysis error:', error);
+      const errorMsg = error.response ?
+        `Server responded with ${error.response.status}: ${JSON.stringify(error.response.data)}` :
+        `Network error or backend is down. Target: ${API_BASE_URL}`;
+      alert(`Connection failed!\n\n${errorMsg}\n\nPlease ensure the backend is running at the configured URL.`);
+      setLoading(false);
     }
-  };
-
-  const reset = () => {
-    setFile(null);
-    setPreview(null);
-    setResult(null);
   };
 
   return (
@@ -220,245 +250,347 @@ const App: React.FC = () => {
             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </div>
           <button className="demo-btn" onClick={() => setShowDemo(true)}>
-            <Zap size={16} /> Help
+            <HelpCircle size={18} /> Help
           </button>
         </div>
       </header>
 
-      <main className="main-content">
-        <div className="layout-grid">
-          <div className="left-panel">
-            <div className="upload-card">
-              {!file ? (
-                <div
-                  className={`drop-zone ${dragActive ? 'dragging' : ''}`}
-                  onDragEnter={handleDrag}
-                  onDragOver={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    onChange={onFileChange}
-                    style={{ display: 'none' }}
-                    accept="image/*"
-                  />
-                  <div className="upload-icon">
-                    <Upload size={32} />
-                  </div>
-                  <div>
-                    <h3>Deep Forensic Scan</h3>
-                    <p>Click or drag to connect with remote analyzer</p>
-                  </div>
-                </div>
-              ) : (
-                <div className={`preview-wrapper ${loading ? 'loading' : ''}`}>
-                  <img src={preview!} alt="Preview" />
-                  {loading && (
-                    <>
-                      <div className="scanning-overlay" />
-                      <div className="virtual-grid-scan" />
-                      <div className="scan-status-badge">
-                        <div className="scan-status-dot" />
-                        VIRTUAL SCANNING ACTIVE
-                      </div>
-                    </>
-                  )}
-                  <div className="preview-actions">
-                    <button
-                      onClick={analyzeImage}
-                      disabled={loading}
-                      className="glass-panel analyze-btn"
-                    >
-                      Analyze the image
-                    </button>
-                    <button
-                      onClick={reset}
-                      disabled={loading}
-                      className="glass-panel change-btn"
-                    >
-                      New Case
-                    </button>
-                  </div>
-                </div>
-              )}
+      <main className="fade-in">
+        {!showReport ? (
+          <div className="scanner-stage">
+            <div className="hero">
+              <h1>Sentinel <span className="text-gradient">Vision</span></h1>
+              <p>Advanced Neural Forensics & AI Generation Detection</p>
             </div>
 
+            <div className="main-content">
+              <div className="left-panel">
+                <div
+                  className={`drop-zone ${dragActive ? 'drag-active' : ''} ${file ? 'has-file' : ''}`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => !loading && fileInputRef.current?.click()}
+                >
+                  <div className="scanning-line"></div>
+                  {!file ? (
+                    <div className="upload-prompt">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        onChange={onFileChange}
+                        style={{ display: 'none' }}
+                        accept="image/*"
+                      />
+                      <div className="upload-icon">
+                        <Upload size={32} />
+                      </div>
+                      <div>
+                        <h3>Deep Forensic Scan</h3>
+                        <p>Click or drag to connect with remote analyzer</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`preview-wrapper ${loading ? 'loading' : ''}`}>
+                      <img src={preview!} alt="Preview" />
+                      {loading && (
+                        <>
+                          <div className="scanning-overlay" />
+                          <div className="virtual-grid-scan" />
+                          <div className="scan-status-badge">
+                            <div className="scan-status-dot" />
+                            VIRTUAL SCANNING ACTIVE
+                          </div>
+                        </>
+                      )}
+                      <div className="preview-actions">
+                        <button
+                          className="analyze-btn"
+                          onClick={analyzeImage}
+                          disabled={loading}
+                        >
+                          {loading ? "Processing Forensic Data..." : "Analyze Image"}
+                        </button>
+                        <button
+                          onClick={reset}
+                          disabled={loading}
+                          className="glass-panel change-btn"
+                        >
+                          New Case
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="right-panel">
+                <motion.div
+                  className="glass-panel history-sidebar"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                >
+                  <div className="sidebar-header">
+                    <div className="sidebar-title">
+                      <Clock size={18} />
+                      <h3>Scan History</h3>
+                    </div>
+                    {history.length > 0 && (
+                      <button className="clear-history-btn" onClick={clearHistory} title="Clear All">
+                        <Trash2 size={14} /> Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="history-list">
+                    {history.length > 0 ? history.map((item, index) => (
+                      <div key={index} className="history-item" onClick={() => { setResult(item); setShowReport(true); }}>
+                        <img
+                          src={item.image_url || `https://via.placeholder.com/150?text=Scan`}
+                          alt="Scan"
+                          className="history-thumb"
+                        />
+                        <div className="history-details">
+                          <div className="history-name">{item.filename}</div>
+                          <div className="history-meta">
+                            <span className={`status-dot ${item.is_ai_generated ? 'ai' : 'real'}`}></span>
+                            {item.prediction_label} • {item.timestamp}
+                          </div>
+                        </div>
+                        <button
+                          className="delete-item-btn"
+                          onClick={(e) => deleteHistoryItem(e, index)}
+                          title="Delete"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )) : (
+                      <div className="empty-history">
+                        <p>No recent detections</p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="report-stage">
             <AnimatePresence>
               {result && (
                 <motion.div
                   className="analysis-container"
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 50 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 20 }}
+                  exit={{ opacity: 0, y: 50 }}
                 >
+
+                  <div className="report-header-actions">
+                    <button className="new-scan-btn" onClick={reset}>
+                      <Upload size={18} /> New Scan
+                    </button>
+                  </div>
+
+                  <div className="summary-signals-grid">
+                    <div
+                      className={`summary-box clickable ${activeTab === 'ml' ? 'active' : ''} ${result.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
+                      onClick={() => setActiveTab('ml')}
+                    >
+                      <Zap size={24} />
+                      <span className="summary-label">Neural Scan</span>
+                      <span className="summary-value">{result.confidence}% {result.is_ai_generated ? 'SUSPICIOUS' : 'CONSISTENT'}</span>
+                    </div>
+
+                    <div
+                      className={`summary-box clickable ${activeTab === 'metadata' ? 'active' : ''} ${result.metadata?.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
+                      onClick={() => setActiveTab('metadata')}
+                    >
+                      <Database size={24} />
+                      <span className="summary-label">Digital Footprint</span>
+                      <span className="summary-value">{result.metadata?.has_camera_info ? 'CONSISTENT' : 'SUSPICIOUS'}</span>
+                    </div>
+
+                    <div
+                      className={`summary-box clickable ${activeTab === 'forensics' ? 'active' : ''} ${result.forensics?.fft_analysis?.has_checkerboard ? 'ai-theme' : 'real-theme'}`}
+                      onClick={() => setActiveTab('forensics')}
+                    >
+                      <Shield size={24} />
+                      <span className="summary-label">Forensic Lab</span>
+                      <span className="summary-value">{result.forensics?.fft_analysis?.has_checkerboard ? 'SUSPICIOUS' : 'CONSISTENT'}</span>
+                    </div>
+                  </div>
+
                   <div className="single-dashboard">
-                    <motion.div
-                      className={`analysis-card ml-card ${result.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
-                    >
-                      <div className="card-header">
-                        <div className="header-badge">
-                          <Zap size={20} />
-                          <span>Remote Node Analysis</span>
-                        </div>
-                        <div className="model-name">Hugging Face API</div>
-                      </div>
-
-                      <div className="verdict-section">
-                        <div className="verdict-icon">
-                          {result.is_ai_generated ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
-                        </div>
-                        <h3 className="verdict-text">{result.prediction_label}</h3>
-                        <div className="confidence-bar">
-                          <div className="bar-fill" style={{ width: `${(result.confidence * 100)}%` }}></div>
-                        </div>
-                        <p className="confidence-text">{(result.confidence * 100).toFixed(1)}% Forensic Confidence</p>
-                      </div>
-
-                      <div className="metrics-grid">
-                        <div className="metric">
-                          <Shield size={16} />
-                          <span>ML Score</span>
-                          <strong>{result.ml_analysis ? `${(result.ml_analysis.confidence * 100).toFixed(1)}%` : 'N/A'}</strong>
-                        </div>
-                        <div className="metric">
-                          <Database size={16} />
-                          <span>Metadata</span>
-                          <strong>{result.metadata?.verdict || 'Unknown'}</strong>
-                        </div>
-                        <div className="metric">
-                          <Zap size={16} />
-                          <span>Combined</span>
-                          <strong>{result.prediction_label}</strong>
-                        </div>
-                      </div>
-                    </motion.div>
-
-                    {/* Metadata Analysis Card */}
-                    <motion.div
-                      className={`metadata-card analysis-card ${result.metadata?.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.2 }}
-                    >
-                      <div className="card-header">
-                        <div className="header-badge">
-                          <Database size={20} />
-                          <span>Digital Footprint Analysis</span>
-                        </div>
-                        <div className="model-name">EXIF Data Structure</div>
-                      </div>
-
-                      <div className="verdict-section">
-                        <div className="verdict-icon">
-                          {result.metadata?.is_ai_generated ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
-                        </div>
-                        <h3 className="verdict-text">{result.metadata?.verdict || 'Unknown'}</h3>
-                        <div className="confidence-bar">
-                          <div className="bar-fill" style={{ width: `${(result.metadata?.confidence || 0) * 100}%` }}></div>
-                        </div>
-                        <p className="confidence-text">{((result.metadata?.confidence || 0) * 100).toFixed(1)}% Metadata Confidence</p>
-                      </div>
-
-                      <div className="metadata-content">
-                        {result.metadata?.has_metadata ? (
-                          <>
-                            <div className="metadata-summary">
-                              <p>
-                                {result.metadata.has_camera_info
-                                  ? '✓ Authenticity criteria met'
-                                  : '⚠ Missing critical camera metadata'}
+                    <AnimatePresence mode="wait">
+                      {activeTab === 'ml' && (
+                        <motion.div
+                          key="ml-tab"
+                          id="ml-analysis"
+                          className={`analysis-card ml-card ${result.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 20 }}
+                        >
+                          <div className="card-header">
+                            <div className="header-badge">
+                              <Zap size={20} />
+                              <span>Neural Scan</span>
+                            </div>
+                            <div className="model-name">Hugging Face API</div>
+                          </div>
+                          <div className="verdict-card-big modern-card">
+                            <div className="final-verdict-display">
+                              <div className="final-verdict-icon">
+                                {result.is_ai_generated ? <AlertTriangle size={64} /> : <CheckCircle size={64} />}
+                              </div>
+                              <h2 className="final-verdict-title">Final Analysis Verdict</h2>
+                              <div className="final-verdict-divider"></div>
+                              <p className="final-verdict-sub">
+                                {result.confidence}% {result.is_ai_generated ? 'SUSPICIOUS' : 'CONSISTENT'} | {result.prediction_label}
                               </p>
-                              <p>Found {Object.keys(result.metadata.data).length} metadata field{Object.keys(result.metadata.data).length !== 1 ? 's' : ''}</p>
-                            </div>
-                            <div className="metadata-grid">
-                              {Object.entries(result.metadata.data).map(([key, value]) => {
-                                const isImportant = ['ResolutionUnit', 'YResolution', 'XResolution', 'YCbCrPositioning', 'Make', 'Model', 'Software', 'DateTime', 'DateTimeOriginal', 'GPSInfo'].includes(key);
-                                return (
-                                  <div key={key} className={`metadata-item ${isImportant ? 'important-meta' : ''}`}>
-                                    <span className="meta-label">{key}</span>
-                                    <span className="meta-value" title={String(value)}>{String(value)}</span>
-                                    {isImportant && <CheckCircle size={10} className="important-check" />}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="no-metadata-warning">
-                            <AlertTriangle size={32} />
-                            <div>
-                              <h4>No Metadata Detected</h4>
-                              <p>Missing EXIF data is a strong indicator of synthetic generation or heavy editing.</p>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    </motion.div>
+                          <div className="verdict-section">
+                            <div className="verdict-icon">
+                              {result.is_ai_generated ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
+                            </div>
+                            <h3 className="verdict-text">{result.prediction_label}</h3>
+                            <div className="confidence-bar">
+                              <div className="bar-fill" style={{ width: `${(result.confidence * 100)}%` }}></div>
+                            </div>
+                            <p className="confidence-text">{(result.confidence * 100).toFixed(1)}% Forensic Confidence</p>
+                          </div>
+                          <div className="metrics-grid">
+                            <div className="metric"><Shield size={16} /><span>ML Score</span><strong>{result.ml_analysis ? `${(result.ml_analysis.confidence * 100).toFixed(1)}%` : 'N/A'}</strong></div>
+                            <div className="metric"><Database size={16} /><span>Metadata</span><strong>{result.metadata?.verdict || 'Unknown'}</strong></div>
+                            <div className="metric"><Zap size={16} /><span>Combined</span><strong>{result.prediction_label}</strong></div>
+                          </div>
+                        </motion.div>
+                      )}
 
-                    {/* Forensic Lab Card */}
-                    {result.forensics && (
-                      <motion.div
-                        className={`forensic-card analysis-card ${(result.forensics.ela_score > 1.5 ||
-                          !result.forensics.sensor_match ||
-                          result.forensics.fft_analysis?.has_checkerboard ||
-                          result.forensics.structural_analysis?.is_inconsistent ||
-                          result.forensics.forensic_probability > 0.5) ? 'ai-theme' : 'real-theme'}`}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.3 }}
-                      >
-                        <div className="card-header">
-                          <div className="header-badge">
-                            <Shield size={20} />
-                            <span>Forensic Lab analysis</span>
+                      {activeTab === 'metadata' && (
+                        <motion.div
+                          key="meta-tab"
+                          id="metadata-analysis"
+                          className={`metadata-card analysis-card ${result.metadata?.is_ai_generated ? 'ai-theme' : 'real-theme'}`}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 20 }}
+                        >
+                          <div className="card-header">
+                            <div className="header-badge"><Database size={20} /><span>Digital Footprint</span></div>
+                            <div className="model-name">EXIF Data Structure</div>
                           </div>
-                          <div className="model-name">DFFT & Texture Scan</div>
-                        </div>
+                          <div className="verdict-section">
+                            <div className="verdict-icon">{result.metadata?.is_ai_generated ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}</div>
+                            <h3 className="verdict-text">{result.metadata?.verdict || 'Unknown'}</h3>
+                            <div className="confidence-bar"><div className="bar-fill" style={{ width: `${(result.metadata?.confidence || 0) * 100}%` }}></div></div>
+                            <p className="confidence-text">{((result.metadata?.confidence || 0) * 100).toFixed(1)}% Metadata Confidence</p>
+                          </div>
+                          <div className="metadata-content">
+                            {result.metadata?.has_metadata ? (
+                              <>
+                                <div className="metadata-summary">
+                                  <p>{result.metadata.has_camera_info ? '✓ Authenticity criteria met' : '⚠ Missing critical camera metadata'}</p>
+                                  <p>Found {Object.keys(result.metadata.data).length} metadata fields</p>
+                                </div>
+                                <div className="metadata-grid">
+                                  {Object.entries(result.metadata.data).map(([key, value]) => (
+                                    <div key={key} className="metadata-item">
+                                      <span className="meta-label">{key}</span>
+                                      <span className="meta-value">{String(value)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="no-metadata-warning">
+                                <AlertTriangle size={32} />
+                                <div><h4>Digital Footprint Analysis</h4><p>Missing EXIF data is a strong indicator of synthetic generation.</p></div>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
 
-                        <div className="verdict-section">
-                          <div className="verdict-icon">
-                            {(result.forensics.forensic_probability > 0.5 || result.forensics.fft_analysis?.has_checkerboard) ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
+                      {activeTab === 'forensics' && result.forensics && (
+                        <motion.div
+                          key="forensics-tab"
+                          id="forensic-analysis"
+                          className="forensic-card analysis-card"
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 20 }}
+                        >
+                          <div className="card-header">
+                            <div className="header-badge"><Shield size={20} /><span>Forensic Lab</span></div>
+                            <div className="model-name">DFFT & Texture Scan</div>
                           </div>
-                          <h3 className="verdict-text">{(result.forensics.forensic_probability > 0.5 || result.forensics.fft_analysis?.has_checkerboard) ? "SUSPICIOUS" : "CONSISTENT"}</h3>
-                          <div className="confidence-bar">
-                            <div className="bar-fill" style={{ width: `${(1 - result.forensics.forensic_probability) * 100}%` }}></div>
+                          <div className="verdict-section">
+                            <div className={`verdict-icon ${(result.forensics.fft_analysis?.has_checkerboard) ? 'ai-text' : 'real-text'}`}>
+                              {result.forensics.fft_analysis?.has_checkerboard ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
+                            </div>
+                            <h3 className={`verdict-text ${(result.forensics.fft_analysis?.has_checkerboard) ? 'ai-text' : 'real-text'}`}>
+                              {result.forensics.fft_analysis?.has_checkerboard ? "SUSPICIOUS" : "CONSISTENT"}
+                            </h3>
+                            <div className="confidence-bar forensic-bar-tri">
+                              <div className="bar-wrapper"><span className="mini-label">Domain</span><div className="bar-bg"><div className="bar-fill domain-fill" style={{ width: `${result.forensics.branch_scores?.domain || 0}%` }}></div></div></div>
+                              <div className="bar-wrapper"><span className="mini-label">Sensor</span><div className="bar-bg"><div className="bar-fill sensor-fill" style={{ width: `${result.forensics.branch_scores?.sensor || 0}%` }}></div></div></div>
+                              <div className="bar-wrapper"><span className="mini-label">Structure</span><div className="bar-bg"><div className="bar-fill structure-fill" style={{ width: `${result.forensics.branch_scores?.structure || 0}%` }}></div></div></div>
+                            </div>
                           </div>
-                          <p className="confidence-text">{(100 - (result.forensics.forensic_probability * 100)).toFixed(1)}% Forensic Integrity</p>
-                        </div>
 
-                        <div className="forensic-grid-extended">
-                          <div className="f-metric-mini">
-                            <div className="f-label">Error Level</div>
-                            <div className={`f-status ${result.forensics.ela_score > 1.5 ? 'warning' : 'success'}`}>{result.forensics.ela_score > 1.5 ? "⚠ High" : "✓ Normal"}</div>
+                          <div className="forensic-diagnostic-log">
+                            <div className="log-item">
+                              <span className="log-label">Fourier Spectrum</span>
+                              <span className={`log-value ${result.forensics.fft_analysis?.has_checkerboard ? 'ai-text' : 'real-text'}`}>
+                                {result.forensics.fft_analysis?.has_checkerboard ? "SYNTHETIC" : "ORGANIC"}
+                              </span>
+                            </div>
+                            <div className="log-item">
+                              <span className="log-label">Sensor Fingerprint</span>
+                              <span className={`log-value ${(result.forensics.branch_scores?.sensor || 0) > 70 ? 'real-text' : 'ai-text'}`}>
+                                {(result.forensics.branch_scores?.sensor || 0) > 70 ? "CONSISTENT" : "ANOMALOUS"}
+                              </span>
+                            </div>
+                            <div className="log-item">
+                              <span className="log-label">Noise Integrity</span>
+                              <span className={`log-value ${(result.forensics.branch_scores?.structure || 0) > 60 ? 'real-text' : 'ai-text'}`}>
+                                {(result.forensics.branch_scores?.structure || 0) > 60 ? "VERIFIED" : "DEGRADED"}
+                              </span>
+                            </div>
                           </div>
-                          <div className="f-metric-mini">
-                            <div className="f-label">Sensor Noise</div>
-                            <div className={`f-status ${!result.forensics.sensor_match ? 'warning' : 'success'}`}>{result.forensics.sensor_match ? "✓ Match" : "⚠ Synthetic"}</div>
-                          </div>
-                          <div className="f-metric-mini">
-                            <div className="f-label">FFT Patterns</div>
-                            <div className={`f-status ${result.forensics.fft_analysis?.has_checkerboard ? 'warning' : 'success'}`}>{result.forensics.fft_analysis?.has_checkerboard ? "⚠ Pattern" : "✓ Clean"}</div>
-                          </div>
-                          <div className="f-metric-mini">
-                            <div className="f-label">Texture</div>
-                            <div className={`f-status ${result.forensics.structural_analysis?.is_inconsistent ? 'warning' : 'success'}`}>{result.forensics.structural_analysis?.is_inconsistent ? "⚠ Discord" : "✓ Consistent"}</div>
-                          </div>
-                        </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                        <div className="forensic-summary">
-                          <p className="summary-text">
-                            {result.forensics.fft_analysis?.has_checkerboard
-                              ? "Artificial checkerboard patterns detected via frequency domain scan (High probability of AI upscaling)."
-                              : result.forensics.structural_analysis?.is_inconsistent
-                                ? "Local structural anomalies found in pixel transitions (Anatomical suspect)."
-                                : "Pixel distribution and domain signals match natural photographic patterns."}
-                          </p>
-                        </div>
-                      </motion.div>
-                    )}
+                    {(() => {
+                      const isRealFootprint = result.metadata?.verdict === "Physical Footprint";
+                      const isMlAuthentic = !result.is_ai_generated;
+                      const isDefinitivelyReal = isRealFootprint && isMlAuthentic;
+
+                      return (
+                        <motion.div
+                          className={`verdict-card-big analysis-card ${isDefinitivelyReal ? 'real-theme' : 'ai-theme'}`}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                        >
+                          <div className="card-header">
+                            <div className="header-badge"><Shield size={20} /><span>Final Analysis Verdict</span></div>
+                            <div className="model-name">Forensic + ML Verification</div>
+                          </div>
+                          <div className="final-verdict-display">
+                            <h2 className="final-verdict-title">{isDefinitivelyReal ? "REAL IMAGE" : "AI GENERATED"}</h2>
+                            <div className="final-verdict-divider"></div>
+                            <p className="final-verdict-sub">
+                              {isDefinitivelyReal ? "Verified Physical Source: All signals confirm authentic origin" : "Artificial Signals Detected: Logic chain indicates synthetic generation"}
+                            </p>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
                   </div>
 
                   <div className="json-raw-section">
@@ -471,47 +603,12 @@ const App: React.FC = () => {
               )}
             </AnimatePresence>
           </div>
-
-          <div className="right-panel">
-            <motion.div
-              className="glass-panel history-sidebar"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-            >
-              <div className="sidebar-header">
-                <Clock size={18} />
-                <h3>Scan History</h3>
-              </div>
-
-              <div className="history-list">
-                {history.length > 0 ? history.map((item, index) => (
-                  <div key={index} className="history-item" onClick={() => setResult(item)}>
-                    <img
-                      src={item.image_url || `https://via.placeholder.com/150?text=Scan`}
-                      alt="Scan"
-                      className="history-thumb"
-                    />
-                    <div className="history-details">
-                      <div className="history-name">{item.filename}</div>
-                      <div className="history-meta">
-                        <span className={`status-dot ${item.is_ai_generated ? 'ai' : 'real'}`}></span>
-                        {item.prediction_label} • {item.timestamp}
-                      </div>
-                    </div>
-                  </div>
-                )) : (
-                  <div className="empty-history">
-                    <p>No recent detections</p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        </div >
-      </main >
+        )}
+      </main>
 
       <DemoModal showDemo={showDemo} setShowDemo={setShowDemo} />
-    </div >
+      {flash && <div className={`screen-flash ${flash}`} />}
+    </div>
   );
 };
 
