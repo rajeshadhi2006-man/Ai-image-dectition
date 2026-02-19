@@ -1,11 +1,12 @@
+---
 title: Detetor2.0
-emoji: 📈
-colorFrom: yellow
+emoji: 🧪
+colorFrom: blue
 colorTo: purple
 sdk: docker
 pinned: false
 license: mit
-
+---
 
 # AI Image Detector 🔍
 
