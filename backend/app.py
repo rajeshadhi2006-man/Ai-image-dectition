@@ -460,15 +460,6 @@ def predict_is_ai_generated(image: Image.Image, image_bytes: bytes = None):
         # Fallback if model not loaded
         return False, 0.5, 0.0
 
-@app.get("/")
-async def serve_frontend():
-    """Serve the frontend React app"""
-    static_dir = os.path.join(BASE_DIR, 'static')
-    index_path = os.path.join(static_dir, 'index.html')
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"status": "online", "message": "AI Image Detector API is running (FastAPI). Use /predict to analyze images.", "docs_url": "/docs"}
-
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
@@ -628,7 +619,16 @@ async def predict(
             "prediction_label": "AI GENERATED" if final_is_ai else "REAL IMAGE",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "image_url": image_url,
-            "metadata": raw_metadata,
+            "metadata": {
+                "has_metadata": raw_metadata.get('has_metadata', False),
+                "verdict": raw_metadata.get('verdict', "No Footprint Available"),
+                "confidence": float(raw_metadata.get('confidence', 0.0)),
+                "is_ai_generated": bool(raw_metadata.get('is_ai_generated', False)),
+                "has_camera_info": bool(raw_metadata.get('has_camera_info', False)),
+                "is_edited": bool(raw_metadata.get('is_edited', False)),
+                "footprint_score": float(raw_metadata.get('footprint_score', 0.0)),
+                "data": raw_metadata.get('data', {})
+            },
             "forensics": {
                 "branch_scores": {
                     "domain": float(domain_score),
@@ -637,16 +637,30 @@ async def predict(
                 },
                 "final_integrity": float(final_forensic_integrity),
                 "ela_score": float(ela_mean),
-                "noise_profile": noise_profile,
-                "fft_analysis": fft_analysis,
-                "structural_analysis": struct_analysis,
+                "noise_profile": {
+                    "noise_score": float(noise_profile.get('noise_score', 0.0)) if noise_profile else 0.0,
+                    "is_natural_sensor": bool(noise_profile.get('is_natural_sensor', False)) if noise_profile else False,
+                    "cfa_match": float(noise_profile.get('cfa_match', 0.0)) if noise_profile else 0.0,
+                    "variance": float(noise_profile.get('variance', 0.0)) if noise_profile else 0.0,
+                    "high_freq_energy": float(noise_profile.get('high_freq_energy', 0.0)) if noise_profile else 0.0,
+                    "gaussian_fit": float(noise_profile.get('gaussian_fit', 0.0)) if noise_profile else 0.0
+                },
+                "fft_analysis": {
+                    "peak_ratio": float(fft_analysis.get('peak_ratio', 0.0)) if fft_analysis else 0.0,
+                    "has_checkerboard": bool(fft_analysis.get('has_checkerboard', False)) if fft_analysis else False
+                },
+                "structural_analysis": {
+                    "entropy": float(struct_analysis.get('entropy', 0.0)) if struct_analysis else 0.0,
+                    "is_inconsistent": bool(struct_analysis.get('is_inconsistent', False)) if struct_analysis else False,
+                    "structural_variance_coeff": float(struct_analysis.get('structural_variance_coeff', 0.0)) if struct_analysis else 0.0
+                },
                 "forensic_probability": float(forensic_ai_probability),
                 "sensor_match": sensor_score > 50
             },
             "ml_analysis": {
                 "is_ai_generated": bool(ml_is_ai),
-                "confidence": float(ml_confidence),
-                "raw_score": float(raw_score)
+                "confidence": float(ml_confidence or 0.0),
+                "raw_score": float(raw_score or 0.0)
             }
         }
         
