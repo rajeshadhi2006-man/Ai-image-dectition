@@ -52,9 +52,12 @@ interface ScanResult {
       structure: number;
     };
     noise_profile?: {
-      skewness: number;
-      kurtosis: number;
       variance: number;
+      high_freq_energy: number;
+      noise_score: number;
+      is_natural_sensor: boolean;
+      gaussian_fit: number;
+      cfa_match: number;
     };
   };
   metadata?: {
@@ -602,45 +605,45 @@ const App: React.FC = () => {
                             <div className="model-name">DFFT & Noise Fingerprint</div>
                           </div>
                           <div className="verdict-section">
-                            <div className={`verdict-icon ${(result.forensics.fft_analysis?.has_checkerboard) ? 'ai-text' : 'real-text'}`}>
-                              {result.forensics.fft_analysis?.has_checkerboard ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
+                            <div className={`verdict-icon ${(result.forensics?.fft_analysis?.has_checkerboard) ? 'ai-text' : 'real-text'}`}>
+                              {result.forensics?.fft_analysis?.has_checkerboard ? <AlertTriangle size={48} /> : <CheckCircle size={48} />}
                             </div>
-                            <h3 className={`verdict-text ${(result.forensics.fft_analysis?.has_checkerboard) ? 'ai-text' : 'real-text'}`}>
-                              {result.forensics.fft_analysis?.has_checkerboard ? "SUSPICIOUS" : "CONSISTENT"}
+                            <h3 className={`verdict-text ${(result.forensics?.fft_analysis?.has_checkerboard) ? 'ai-text' : 'real-text'}`}>
+                              {result.forensics?.fft_analysis?.has_checkerboard ? "SUSPICIOUS" : "CONSISTENT"}
                             </h3>
                             <div className="confidence-bar forensic-bar-tri">
-                              <div className="bar-wrapper"><span className="mini-label">Domain</span><div className="bar-bg"><div className="bar-fill domain-fill" style={{ width: `${result.forensics.branch_scores?.domain || 0}%` }}></div></div></div>
-                              <div className="bar-wrapper"><span className="mini-label">Sensor</span><div className="bar-bg"><div className="bar-fill sensor-fill" style={{ width: `${result.forensics.branch_scores?.sensor || 0}%` }}></div></div></div>
-                              <div className="bar-wrapper"><span className="mini-label">Structure</span><div className="bar-bg"><div className="bar-fill structure-fill" style={{ width: `${result.forensics.branch_scores?.structure || 0}%` }}></div></div></div>
+                              <div className="bar-wrapper"><span className="mini-label">Domain</span><div className="bar-bg"><div className="bar-fill domain-fill" style={{ width: `${result.forensics?.branch_scores?.domain || 0}%` }}></div></div></div>
+                              <div className="bar-wrapper"><span className="mini-label">Sensor</span><div className="bar-bg"><div className="bar-fill sensor-fill" style={{ width: `${result.forensics?.branch_scores?.sensor || 0}%` }}></div></div></div>
+                              <div className="bar-wrapper"><span className="mini-label">Structure</span><div className="bar-bg"><div className="bar-fill structure-fill" style={{ width: `${result.forensics?.branch_scores?.structure || 0}%` }}></div></div></div>
                             </div>
                           </div>
 
                           <div className="forensic-diagnostic-log">
                             <div className="log-item">
                               <span className="log-label">Final Integrity</span>
-                              <span className="log-value">{result.forensics.final_integrity?.toFixed(2)}%</span>
+                              <span className="log-value">{result.forensics?.final_integrity?.toFixed(2)}%</span>
                             </div>
                             <div className="log-item">
                               <span className="log-label">Fourier Transform</span>
-                              <span className={`log-value ${result.forensics.fft_analysis?.has_checkerboard ? 'ai-text' : 'real-text'}`}>
-                                {result.forensics.fft_analysis?.has_checkerboard ? "PATTERN DETECTED" : "NATURAL SPECTRUM"}
+                              <span className={`log-value ${result.forensics?.fft_analysis?.has_checkerboard ? 'ai-text' : 'real-text'}`}>
+                                {result.forensics?.fft_analysis?.has_checkerboard ? "PATTERN DETECTED" : "NATURAL SPECTRUM"}
                               </span>
                             </div>
                             <div className="log-item">
                               <span className="log-label">Structural Variance</span>
-                              <span className={`log-value ${result.forensics.structural_analysis?.is_inconsistent ? 'ai-text' : 'real-text'}`}>
-                                {result.forensics.structural_analysis?.is_inconsistent ? "ANOMALOUS" : "VERIFIED"}
+                              <span className={`log-value ${result.forensics?.structural_analysis?.is_inconsistent ? 'ai-text' : 'real-text'}`}>
+                                {result.forensics?.structural_analysis?.is_inconsistent ? "ANOMALOUS" : "VERIFIED"}
                               </span>
                             </div>
                             <div className="log-item">
                               <span className="log-label">Noise Profile</span>
-                              <span className={`log-value ${result.forensics.noise_profile?.is_natural_sensor ? 'real-text' : 'ai-text'}`}>
-                                {result.forensics.noise_profile?.is_natural_sensor ? "NATURAL" : "SYNTHETIC/STRETCHED"}
+                              <span className={`log-value ${result.forensics?.noise_profile?.is_natural_sensor ? 'real-text' : 'ai-text'}`}>
+                                {result.forensics?.noise_profile?.is_natural_sensor ? "NATURAL" : "SYNTHETIC/STRETCHED"}
                               </span>
                             </div>
                             <div className="log-item">
                               <span className="log-label">CFA Interpolation</span>
-                              <span className="log-value">{(result.forensics.noise_profile?.cfa_match || 0) * 100}% Match</span>
+                              <span className="log-value">{(result.forensics?.noise_profile?.cfa_match || 0) * 100}% Match</span>
                             </div>
                           </div>
                         </motion.div>
