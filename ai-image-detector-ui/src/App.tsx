@@ -205,7 +205,7 @@ const App: React.FC = () => {
       const normalizedResult: ScanResult = {
         ...data,
         timestamp: data.timestamp || new Date().toLocaleString(),
-        prediction_label: data.prediction_label || (data.is_ai_generated ? 'Artificial' : 'Authentic')
+        prediction_label: data.prediction_label || (data.is_ai_generated ? 'AI GENERATED' : 'REAL IMAGE')
       };
 
       setResult(normalizedResult);
@@ -445,10 +445,14 @@ const App: React.FC = () => {
                               <div className="final-verdict-icon">
                                 {result.is_ai_generated ? <AlertTriangle size={64} /> : <CheckCircle size={64} />}
                               </div>
-                              <h2 className="final-verdict-title">Final Analysis Verdict</h2>
+                              <h2 className="final-verdict-title">
+                                {result.is_ai_generated ? "AI GENERATED" : "REAL IMAGE"}
+                              </h2>
                               <div className="final-verdict-divider"></div>
                               <p className="final-verdict-sub">
-                                {result.confidence}% {result.is_ai_generated ? 'SUSPICIOUS' : 'CONSISTENT'} | {result.prediction_label}
+                                {result.is_ai_generated
+                                  ? "Artificial Signals Detected: Logic chain indicates synthetic generation"
+                                  : "Verified Physical Source: All signals confirm authentic origin"}
                               </p>
                             </div>
                           </div>
@@ -567,9 +571,7 @@ const App: React.FC = () => {
                     </AnimatePresence>
 
                     {(() => {
-                      const isRealFootprint = result.metadata?.verdict === "Physical Footprint";
-                      const isMlAuthentic = !result.is_ai_generated;
-                      const isDefinitivelyReal = isRealFootprint && isMlAuthentic;
+                      const isDefinitivelyReal = result.global_score > 50;
 
                       return (
                         <motion.div

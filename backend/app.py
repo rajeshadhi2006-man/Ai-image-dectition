@@ -609,7 +609,7 @@ async def predict(
             "is_ai_generated": bool(final_is_ai),
             "confidence": float(final_confidence),
             "global_score": float(global_score),
-            "prediction_label": "AI-Generated" if final_is_ai else "Authentic",
+            "prediction_label": "AI GENERATED" if final_is_ai else "REAL IMAGE",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "image_url": image_url,
             "metadata": raw_metadata,
